@@ -197,11 +197,6 @@ async def stop(message: Message):
     await msg.delete()
 
 
-@dp.message_handler()
-async def lol(message: Message):
-    await message.reply(message.text)
-
-
 @dp.callback_query_handler(lambda c: c.data == 'yes', state=States.ask_send)
 async def send_wrapper(call: CallbackQuery = None, message: Message = None, state: FSMContext = None):
     if state:
