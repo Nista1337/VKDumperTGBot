@@ -1,6 +1,6 @@
 # AIOGram imports
 from aiogram import Bot, Dispatcher, executor
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.dispatcher import FSMContext
@@ -19,7 +19,7 @@ from zipstream import AioZipStream
 import aiofiles
 
 logger.info('Telegram bot for VKParser by AlexanderBaransky')
-logger.info('Ver. 0.0.3')
+logger.info('Ver. 0.0.4')
 
 # Config loading
 with open('telegram/config.json') as f:
@@ -37,6 +37,7 @@ dp = Dispatcher(bot, storage=storage)
 # FSM states
 class States(StatesGroup):
     get_token = State()
+    ask_send = State()
 
 
 process: subprocess.Popen
@@ -154,11 +155,17 @@ async def launch(message: Message):
 
     stdout_worker = Thread(target=update_output, daemon=True).start()
     code = await update_status(msg)
-
+    keyboard = None
     if code == 0:
         text = '\u2705 <b>Завершено!</b>\nСохранение выполнено'
     elif code == -15:
-        text = get_smile("\ud83d\udfe8") + ' <b>Завершено!</b>\nПарсер завершен вручную\nСохранение выполнено частично'
+        text = get_smile("\ud83d\udfe8") + ' <b>Завершено!</b>\nПарсер завершен вручную\n' \
+                                           'Сохранение выполнено частично\nОтправить архив?'
+        keyboard = InlineKeyboardMarkup().add(
+            InlineKeyboardButton('Да', callback_data='yes'),
+            InlineKeyboardButton('Нет', callback_data='no')
+        )
+        await States.ask_send.set()
     elif code == 100:
         await bot.edit_message_text('\u274c <b>Ошибка!</b>\nНеверный токен!', message_id=msg.message_id,
                                     chat_id=msg.chat.id, parse_mode='HTML')
@@ -168,12 +175,16 @@ async def launch(message: Message):
                                     chat_id=msg.chat.id, parse_mode='HTML')
         return
 
-    await bot.edit_message_text(text, message_id=msg.message_id,
-                                chat_id=msg.chat.id, parse_mode='HTML')
+    if keyboard:
+        await bot.edit_message_text(text, message_id=msg.message_id,
+                                    chat_id=msg.chat.id, parse_mode='HTML', reply_markup=keyboard)
+        return
+    else:
+        await bot.edit_message_text(text, message_id=msg.message_id,
+                                    chat_id=msg.chat.id, parse_mode='HTML')
+
     await asyncio.sleep(2)
-    data = json.loads(output[-1])
-    await pack_upload(msg, data['path'][:-1])
-    output = []
+    await send_wrapper(message=msg)
 
 
 @dp.message_handler(commands='stop')
@@ -189,6 +200,30 @@ async def stop(message: Message):
 @dp.message_handler()
 async def lol(message: Message):
     await message.reply(message.text)
+
+
+@dp.callback_query_handler(lambda c: c.data == 'yes', state=States.ask_send)
+async def send_wrapper(call: CallbackQuery = None, message: Message = None, state: FSMContext = None):
+    if state:
+        await state.finish()
+
+    global output
+    data = json.loads(output[-1])
+    if message:
+        await pack_upload(message, data['path'][:-1])
+    else:
+        await pack_upload(call.message, data['path'][:-1])
+    output = []
+
+
+@dp.callback_query_handler(lambda c: c.data == 'no', state=States.ask_send)
+async def reset_keyboard(call: CallbackQuery, state: FSMContext):
+    await state.finish()
+    await bot.edit_message_text(text=get_smile("\ud83d\udfe8") + ' <b>Завершено!</b>\nПарсер завершен вручную\n'
+                                                                 'Сохранение выполнено частично',
+                                message_id=call.message.message_id, chat_id=call.message.chat.id, parse_mode='HTML')
+    global output
+    output = []
 
 
 async def on_startup(dp: Dispatcher):
