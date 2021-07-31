@@ -190,8 +190,7 @@ def get_smile(text: str):
 
 
 async def pack_upload(msg: Message, dir_name: str):
-    await bot.edit_message_text('<b>Отправляю архив...</b>', message_id=msg.message_id,
-                                chat_id=msg.chat.id, parse_mode='HTML')
+    bot_msg = await msg.reply('<b>Отправляю архив...</b>', parse_mode='HTML', reply=False)
     await bot.send_chat_action(chat_id=msg.chat.id, action='upload_document')
     files = []
     for folder_name, subfolders, filenames in os.walk(dir_name):
@@ -215,8 +214,7 @@ async def pack_upload(msg: Message, dir_name: str):
     await zip_file.close()
 
     await bot.send_document(chat_id=msg.chat.id, document=InputFile(zip_filename))
-    await bot.edit_message_text('<b>Готово!</b>', message_id=msg.message_id,
-                                chat_id=msg.chat.id, parse_mode='HTML')
+    await bot_msg.edit_text('<b>Готово!</b>', parse_mode='HTML')
 
 
 @dp.message_handler(commands='launch')
@@ -281,7 +279,6 @@ async def launch(message: Message, state: FSMContext):
         await bot.edit_message_text(text, message_id=msg.message_id,
                                     chat_id=msg.chat.id, parse_mode='HTML')
 
-    await asyncio.sleep(2)
     await send_wrapper(message=msg)
 
 
