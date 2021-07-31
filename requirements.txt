@@ -2,3 +2,5 @@ aiogram
 loguru
 aiozipstream
 aiofiles
+sqlalchemy
+aiosqlite

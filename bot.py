@@ -8,6 +8,16 @@ from aiogram.types import InputFile
 
 from aiogram.utils.exceptions import MessageNotModified
 
+# SQLAlchemy imports
+from sqlalchemy import Column
+from sqlalchemy import Integer, String, Boolean
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.future import select
+from sqlalchemy import delete
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+# Misc imports
 import os
 import json
 from loguru import logger
@@ -19,7 +29,7 @@ from zipstream import AioZipStream
 import aiofiles
 
 logger.info('Telegram bot for VKParser by AlexanderBaransky')
-logger.info('Ver. 0.0.4')
+logger.info('Ver. 0.0.5')
 
 # Config loading
 with open('telegram/config.json') as f:
@@ -33,16 +43,47 @@ storage = MemoryStorage()
 bot = Bot(config['token'])
 dp = Dispatcher(bot, storage=storage)
 
+# SQLAlchemy initialization
+Base = declarative_base()
+
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    token = Column(String, nullable=False)
+    limit = Column(Integer, nullable=False)
+    group_attachments = Column(Boolean, nullable=False)
+    type_users = Column(Boolean, nullable=False)
+    type_chats = Column(Boolean, nullable=False)
+    type_groups = Column(Boolean, nullable=False)
+
+
+async def init_db():
+    global db_engine
+    db_engine = create_async_engine("sqlite+aiosqlite:///db.sqlite", )
+
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async_session = sessionmaker(db_engine, class_=AsyncSession)
+    global db_session
+    db_session = async_session()
+    await db_session.begin()
+
 
 # FSM states
 class States(StatesGroup):
     get_token = State()
     ask_send = State()
+    working = State()
+    reset = State()
 
 
 process: subprocess.Popen
 stdout_worker: Thread
 output = []
+db_session: AsyncSession
+db_engine: AsyncEngine
 
 logger.info('Starting polling...')
 
@@ -54,10 +95,15 @@ def update_parser_config():
 
 @dp.message_handler(commands='start')
 async def start(message: Message):
+    result = await db_session.execute(select(User.id).filter_by(id=message.from_user.id))
+    if result.scalar_one_or_none() == message.from_user.id:
+        await message.reply('Нельзя делать повторный старт!', reply=False)
+        return
+
     await message.reply('Привет! Я бот для управления парсером ВК из Telegram!\n'
                         'Для работы необходимо получить токен API\n'
                         'Вот инструкция: https://telegra.ph/Poluchenie-klyucha-tokena-API-07-25\n'
-                        'Позже отправьте его мне')
+                        'Позже отправьте его мне', reply=False)
     await States.get_token.set()
 
 
@@ -75,10 +121,41 @@ async def get_token(message: Message, state: FSMContext):
         update_parser_config()
         await message.reply('Я запомню!')
         await state.finish()
+
+        db_session.add(User(id=message.from_user.id, token=message.text, limit=200, group_attachments=True,
+                            type_users=True, type_chats=True, type_groups=True))
+        await db_session.commit()
     else:
         await message.reply('Неверный токен!\n'
                             'Попробуйте еще раз\n'
                             '(Не совпадает длина)')
+
+
+@dp.message_handler(commands='reset')
+async def reset(message: Message):
+    keyboard = InlineKeyboardMarkup().add(
+        InlineKeyboardButton('Да', callback_data='yes'),
+        InlineKeyboardButton('Нет', callback_data='no')
+    )
+    await States.reset.set()
+    await message.reply('Это удалит все ваши данные из БД (токен, настройки)!\n'
+                        'Хотите продолжить?', reply_markup=keyboard)
+
+
+@dp.callback_query_handler(lambda c: c.data == 'yes', state=States.reset)
+async def apply_reset(call: CallbackQuery, state: FSMContext):
+    await db_session.execute(delete(User).filter_by(id=call.from_user.id))
+    await db_session.commit()
+    await state.finish()
+    await call.message.edit_text('<b>Сброс выполнен!</b>', parse_mode='HTML')
+    await asyncio.sleep(3)
+    await call.message.delete()
+
+
+@dp.callback_query_handler(lambda c: c.data == 'no', state=States.reset)
+async def cancel_reset(call: CallbackQuery, state: FSMContext):
+    await call.message.delete()
+    await state.finish()
 
 
 async def update_status(msg: Message):
@@ -92,7 +169,8 @@ async def update_status(msg: Message):
                 await bot.edit_message_text('<b>Парсер работает...</b>\n' +
                                             get_smile("\ud83d\udce9") + f' Чатов сохранено: <i>{data["current"] - 1} '
                                                                         f'из {data["total"]}</i>\n'
-                                            f'\u274c Ошибок: <i>{data["errors"]}</i>', message_id=msg.message_id,
+                                                                        f'\u274c Ошибок: <i>{data["errors"]}</i>',
+                                            message_id=msg.message_id,
                                             chat_id=msg.chat.id, parse_mode='HTML')
             except MessageNotModified:
                 await asyncio.sleep(0.5)
@@ -144,17 +222,36 @@ async def pack_upload(msg: Message, dir_name: str):
 
 
 @dp.message_handler(commands='launch')
-async def launch(message: Message):
+async def launch(message: Message, state: FSMContext):
+    await States.working.set()
     msg = await message.reply('<b>Запускаю парсер...</b>', reply=False, parse_mode='HTML')
+
     global process
-    process = subprocess.Popen(['python3', 'main.py', '-j'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    await bot.edit_message_text('<b>Парсер запущен!</b>', chat_id=message.chat.id, message_id=msg.message_id, parse_mode='HTML')
+    cmd = ['python3', 'main.py', '-j']
+    user = await db_session.execute(select(User).filter_by(id=message.from_user.id))
+    user = user.scalar_one()
+
+    cmd.extend(['-t', user.token,
+                '-l', str(user.limit)])
+    if user.type_users:
+        cmd.append('-u')
+
+    if user.type_chats:
+        cmd.append('-c')
+
+    if user.type_groups:
+        cmd.append('-g')
+    print(cmd)
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    await bot.edit_message_text('<b>Парсер запущен!</b>', chat_id=message.chat.id, message_id=msg.message_id,
+                                parse_mode='HTML')
 
     global stdout_worker
     global output
 
     stdout_worker = Thread(target=update_output, daemon=True).start()
     code = await update_status(msg)
+    await state.finish()
     keyboard = None
     if code == 0:
         text = '\u2705 <b>Завершено!</b>\nСохранение выполнено'
@@ -222,7 +319,12 @@ async def reset_keyboard(call: CallbackQuery, state: FSMContext):
 
 
 async def on_startup(dp: Dispatcher):
+    await init_db()
     logger.info('Started OK')
 
 
-executor.start_polling(dp, on_startup=on_startup)
+async def on_shutdown(dp: Dispatcher):
+    await db_engine.dispose()
+
+
+executor.start_polling(dp, on_startup=on_startup, on_shutdown=on_shutdown)
