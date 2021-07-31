@@ -22,7 +22,6 @@ import subprocess
 import asyncio
 from threading import Thread
 
-from init import parser_config
 from init import User
 from init import dp, bot, Dispatcher
 from init import init_db
@@ -46,11 +45,6 @@ output = []
 logger.info('Telegram bot for VKParser by AlexanderBaransky')
 logger.info('Ver. 0.0.6')
 logger.info('Starting polling...')
-
-
-def update_parser_config():
-    f = open('config.json', 'w')
-    json.dump(parser_config, f)
 
 
 @dp.message_handler(commands='start')

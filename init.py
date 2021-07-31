@@ -15,10 +15,6 @@ import json
 with open('telegram/config.json') as f:
     config = json.load(f)
 
-with open('config.json') as f:
-    parser_config = json.load(f)
-
-
 # AIOGram initialization
 storage = MemoryStorage()
 bot = Bot(config['token'])
