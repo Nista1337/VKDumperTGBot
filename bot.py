@@ -1,74 +1,31 @@
 # AIOGram imports
-from aiogram import Bot, Dispatcher, executor
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram import executor
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.dispatcher import FSMContext
 from aiogram.types import InputFile
-
 from aiogram.utils.exceptions import MessageNotModified
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine
 
 # SQLAlchemy imports
-from sqlalchemy import Column
-from sqlalchemy import Integer, String, Boolean
-from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine
-from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.future import select
 from sqlalchemy import delete
-from sqlalchemy.orm import declarative_base, sessionmaker
+
+# Util imports
+from utils import get_smile
+from utils import get_packed_dir
 
 # Misc imports
-import os
 import json
 from loguru import logger
 import subprocess
 import asyncio
 from threading import Thread
 
-from zipstream import AioZipStream
-import aiofiles
-
-logger.info('Telegram bot for VKParser by AlexanderBaransky')
-logger.info('Ver. 0.0.5')
-
-# Config loading
-with open('telegram/config.json') as f:
-    config = json.load(f)
-
-with open('config.json') as f:
-    parser_config = json.load(f)
-
-# AIOGram initialization
-storage = MemoryStorage()
-bot = Bot(config['token'])
-dp = Dispatcher(bot, storage=storage)
-
-# SQLAlchemy initialization
-Base = declarative_base()
-
-
-class User(Base):
-    __tablename__ = 'users'
-    id = Column(Integer, primary_key=True)
-    token = Column(String, nullable=False)
-    limit = Column(Integer, nullable=False)
-    group_attachments = Column(Boolean, nullable=False)
-    type_users = Column(Boolean, nullable=False)
-    type_chats = Column(Boolean, nullable=False)
-    type_groups = Column(Boolean, nullable=False)
-
-
-async def init_db():
-    global db_engine
-    db_engine = create_async_engine("sqlite+aiosqlite:///db.sqlite", )
-
-    async with db_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    async_session = sessionmaker(db_engine, class_=AsyncSession)
-    global db_session
-    db_session = async_session()
-    await db_session.begin()
+from init import parser_config
+from init import User
+from init import dp, bot, Dispatcher
+from init import init_db
 
 
 # FSM states
@@ -79,12 +36,15 @@ class States(StatesGroup):
     reset = State()
 
 
+# Global variables
+db_session: AsyncSession
+db_engine: AsyncEngine
 process: subprocess.Popen
 stdout_worker: Thread
 output = []
-db_session: AsyncSession
-db_engine: AsyncEngine
 
+logger.info('Telegram bot for VKParser by AlexanderBaransky')
+logger.info('Ver. 0.0.6')
 logger.info('Starting polling...')
 
 
@@ -185,38 +145,6 @@ def update_output():
         output.append(line.removesuffix('\n'))
 
 
-def get_smile(text: str):
-    return text.encode('utf-16', 'surrogatepass').decode('utf-16')
-
-
-async def pack_upload(msg: Message, dir_name: str):
-    bot_msg = await msg.reply('<b>Отправляю архив...</b>', parse_mode='HTML', reply=False)
-    await bot.send_chat_action(chat_id=msg.chat.id, action='upload_document')
-    files = []
-    for folder_name, subfolders, filenames in os.walk(dir_name):
-        for filename in filenames:
-            # create complete filepath of file in directory
-            file_path = os.path.join(folder_name, filename)
-            # Add file to zip
-            files.append({'file': file_path,
-                          'name': os.path.relpath(file_path,
-                                                  os.path.join(dir_name, '..'))})
-
-    if not os.path.exists('packed'):
-        os.makedirs('packed')
-
-    aiozip = AioZipStream(files)
-    zip_filename = 'packed/' + dir_name + '.zip'
-    zip_file = await aiofiles.open(zip_filename, 'wb')
-    async for chunk in aiozip.stream():
-        await zip_file.write(chunk)
-
-    await zip_file.close()
-
-    await bot.send_document(chat_id=msg.chat.id, document=InputFile(zip_filename))
-    await bot_msg.edit_text('<b>Готово!</b>', parse_mode='HTML')
-
-
 @dp.message_handler(commands='launch')
 async def launch(message: Message, state: FSMContext):
     await States.working.set()
@@ -246,7 +174,6 @@ async def launch(message: Message, state: FSMContext):
                                 parse_mode='HTML')
 
     global stdout_worker
-    global output
 
     stdout_worker = Thread(target=update_output, daemon=True).start()
     code = await update_status(msg)
@@ -282,7 +209,7 @@ async def launch(message: Message, state: FSMContext):
     await send_wrapper(message=msg)
 
 
-@dp.message_handler(commands='stop')
+@dp.message_handler(commands='stop', state=States.working)
 async def stop(message: Message):
     msg = await message.reply('<b>Останавливаю парсер...</b>', reply=False, parse_mode='HTML')
     process.terminate()
@@ -300,9 +227,14 @@ async def send_wrapper(call: CallbackQuery = None, message: Message = None, stat
     global output
     data = json.loads(output[-1])
     if message:
-        await pack_upload(message, data['path'][:-1])
+        msg = message
     else:
-        await pack_upload(call.message, data['path'][:-1])
+        msg = call.message
+
+    bot_msg = await msg.reply('<b>Отправляю архив...</b>', parse_mode='HTML', reply=False)
+    await bot.send_chat_action(chat_id=msg.chat.id, action='upload_document')
+    await bot.send_document(chat_id=msg.chat.id, document=InputFile(await get_packed_dir(data['path'][:-1])))
+    await bot_msg.edit_text('<b>Готово!</b>', parse_mode='HTML')
     output = []
 
 
@@ -317,7 +249,8 @@ async def reset_keyboard(call: CallbackQuery, state: FSMContext):
 
 
 async def on_startup(dp: Dispatcher):
-    await init_db()
+    global db_session, db_engine
+    db_session, db_engine = await init_db()
     logger.info('Started OK')
 
 
