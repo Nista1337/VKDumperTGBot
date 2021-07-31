@@ -24,7 +24,7 @@ from threading import Thread
 
 from init import User
 from init import dp, bot, Dispatcher
-from init import init_db
+from init import db
 
 
 # FSM states
@@ -36,8 +36,6 @@ class States(StatesGroup):
 
 
 # Global variables
-db_session: AsyncSession
-db_engine: AsyncEngine
 process: subprocess.Popen
 stdout_worker: Thread
 output = []
@@ -49,7 +47,7 @@ logger.info('Starting polling...')
 
 @dp.message_handler(commands='start')
 async def start(message: Message):
-    result = await db_session.execute(select(User.id).filter_by(id=message.from_user.id))
+    result = await db.session.execute(select(User.id).filter_by(id=message.from_user.id))
     if result.scalar_one_or_none() == message.from_user.id:
         await message.reply('Нельзя делать повторный старт!', reply=False)
         return
@@ -78,9 +76,9 @@ async def get_token(message: Message, state: FSMContext):
                             '(Не совпадает длина)')
         return
 
-    db_session.add(User(id=message.from_user.id, token=token, limit=200, group_attachments=True,
+    db.session.add(User(id=message.from_user.id, token=token, limit=200, group_attachments=True,
                         type_users=True, type_chats=True, type_groups=True))
-    await db_session.commit()
+    await db.session.commit()
 
 
 @dp.message_handler(commands='reset')
@@ -96,8 +94,8 @@ async def reset(message: Message):
 
 @dp.callback_query_handler(lambda c: c.data == 'yes', state=States.reset)
 async def apply_reset(call: CallbackQuery, state: FSMContext):
-    await db_session.execute(delete(User).filter_by(id=call.from_user.id))
-    await db_session.commit()
+    await db.session.execute(delete(User).filter_by(id=call.from_user.id))
+    await db.session.commit()
     await state.finish()
     await call.message.edit_text('<b>Сброс выполнен!</b>', parse_mode='HTML')
     await asyncio.sleep(3)
@@ -146,7 +144,7 @@ async def launch(message: Message, state: FSMContext):
 
     global process
     cmd = ['python3', 'main.py', '-j']
-    user = await db_session.execute(select(User).filter_by(id=message.from_user.id))
+    user = await db.session.execute(select(User).filter_by(id=message.from_user.id))
     user = user.scalar_one()
 
     cmd.extend(['-t', user.token,
@@ -243,13 +241,12 @@ async def reset_keyboard(call: CallbackQuery, state: FSMContext):
 
 
 async def on_startup(dp: Dispatcher):
-    global db_session, db_engine
-    db_session, db_engine = await init_db()
+    await db.init_db()
     logger.info('Started OK')
 
 
 async def on_shutdown(dp: Dispatcher):
-    await db_engine.dispose()
+    await db.engine.dispose()
 
 
 executor.start_polling(dp, on_startup=on_startup, on_shutdown=on_shutdown)

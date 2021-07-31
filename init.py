@@ -5,7 +5,7 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 # SQLAlchemy imports
 from sqlalchemy import Column
 from sqlalchemy import Integer, String, Boolean
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -35,13 +35,19 @@ class User(Base):
     type_groups = Column(Boolean, nullable=False)
 
 
-async def init_db():
-    db_engine = create_async_engine("sqlite+aiosqlite:///db.sqlite", )
+class Database:
+    engine: AsyncEngine
+    session: AsyncSession
 
-    async with db_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    async def init_db(self):
+        self.engine = create_async_engine("sqlite+aiosqlite:///db.sqlite", )
 
-    async_session = sessionmaker(db_engine, class_=AsyncSession)
-    db_session = async_session()
-    await db_session.begin()
-    return db_session, db_engine
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        async_session = sessionmaker(self.engine, class_=AsyncSession)
+        self.session = async_session()
+        await self.session.begin()
+
+
+db = Database()
