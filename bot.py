@@ -163,7 +163,7 @@ async def launch(message: Message, state: FSMContext):
     if user.group_attachments:
         cmd.append('-G')
 
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd='../')
     await bot.edit_message_text('<b>Парсер запущен!</b>', chat_id=message.chat.id, message_id=msg.message_id,
                                 parse_mode='HTML')
 

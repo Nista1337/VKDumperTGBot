@@ -14,11 +14,11 @@ async def get_packed_dir(dir_name: str):
                           'name': os.path.relpath(file_path,
                                                   os.path.join(dir_name, '..'))})
 
-    if not os.path.exists('packed'):
-        os.makedirs('packed')
+    if not os.path.exists('../packed'):
+        os.makedirs('../packed')
 
     aiozip = AioZipStream(files)
-    zip_filename = 'packed/' + dir_name + '.zip'
+    zip_filename = '../packed/' + dir_name + '.zip'
     zip_file = await aiofiles.open(zip_filename, 'wb')
     async for chunk in aiozip.stream():
         await zip_file.write(chunk)

@@ -12,7 +12,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 import json
 
 # Config loading
-with open('telegram/config.json') as f:
+with open('config.json') as f:
     config = json.load(f)
 
 # AIOGram initialization
