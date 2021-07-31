@@ -112,23 +112,21 @@ async def get_token(message: Message, state: FSMContext):
     if 'https' in message.text:
         token = message.text.removeprefix('https://api.vk.com/blank.html#access_token=')
         token = token[:-(len(token) - 85)]
-        parser_config['token'] = token
-        update_parser_config()
         await message.reply('Я запомню!')
         await state.finish()
     elif len(message.text) == 85:
-        parser_config['token'] = message.text
-        update_parser_config()
+        token = message.text
         await message.reply('Я запомню!')
         await state.finish()
-
-        db_session.add(User(id=message.from_user.id, token=message.text, limit=200, group_attachments=True,
-                            type_users=True, type_chats=True, type_groups=True))
-        await db_session.commit()
     else:
         await message.reply('Неверный токен!\n'
                             'Попробуйте еще раз\n'
                             '(Не совпадает длина)')
+        return
+
+    db_session.add(User(id=message.from_user.id, token=token, limit=200, group_attachments=True,
+                        type_users=True, type_chats=True, type_groups=True))
+    await db_session.commit()
 
 
 @dp.message_handler(commands='reset')
@@ -241,7 +239,10 @@ async def launch(message: Message, state: FSMContext):
 
     if user.type_groups:
         cmd.append('-g')
-    print(cmd)
+
+    if user.group_attachments:
+        cmd.append('-G')
+
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     await bot.edit_message_text('<b>Парсер запущен!</b>', chat_id=message.chat.id, message_id=msg.message_id,
                                 parse_mode='HTML')
