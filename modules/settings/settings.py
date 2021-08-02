@@ -26,11 +26,13 @@ async def settings(message: Message, state: FSMContext):
 
 
 async def show_settings(message: Message, result: bool, edit: bool = False):
-    keyboard = InlineKeyboardMarkup(row_width=1).add(
+    keyboard = InlineKeyboardMarkup(row_width=3).add(
         InlineKeyboardButton('Токен', callback_data='token'),
         InlineKeyboardButton('Типы чатов', callback_data='types'),
-        InlineKeyboardButton('Лимит сообщений', callback_data='limit'),
+        InlineKeyboardButton('Лимит', callback_data='limit'),
         InlineKeyboardButton('Группировать вложения: ' + '\u2705' if result else '\u274c', callback_data='group_attach')
+    ).row(
+        InlineKeyboardButton('\u274c' + 'Выход', callback_data='close')
     )
     await States.main.set()
     text = 'Это меню настроек. Тут можно подстроить парсер под свои предпочтения!\n' \
@@ -53,3 +55,9 @@ async def back(call: CallbackQuery = None, message: Message = None, from_user: i
         result = await db.session.execute(select(User.group_attachments).filter_by(id=from_user))
         result = result.scalar_one()
         await show_settings(message, result, True)
+
+
+@dp.callback_query_handler(lambda c: c.data == 'close', state=States)
+async def close(call: CallbackQuery, state: FSMContext):
+    await call.message.delete()
+    await state.finish()
