@@ -31,7 +31,7 @@ from init import db
 import modules.settings
 import modules.settings.token
 import modules.settings.types
-
+import modules.settings.limit
 
 # FSM states
 class States(StatesGroup):

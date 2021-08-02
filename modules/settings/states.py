@@ -7,3 +7,5 @@ class States(StatesGroup):
     token_lvl1 = State()
     token_lvl2 = State()
     types = State()
+    limit_lvl1 = State()
+    limit_lvl2 = State()
