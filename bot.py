@@ -30,6 +30,7 @@ from init import db
 # Modules imports
 import modules.settings
 import modules.settings.token
+import modules.settings.types
 
 
 # FSM states
