@@ -22,9 +22,14 @@ import subprocess
 import asyncio
 from threading import Thread
 
+# Init imports
 from init import User
 from init import dp, bot, Dispatcher
 from init import db
+
+# Modules imports
+import modules.settings
+import modules.settings.token
 
 
 # FSM states
@@ -41,7 +46,7 @@ stdout_worker: Thread
 output = []
 
 logger.info('Telegram bot for VKParser by AlexanderBaransky')
-logger.info('Ver. 0.0.6')
+logger.info('Ver. 0.1 Alpha')
 logger.info('Starting polling...')
 
 
@@ -64,12 +69,8 @@ async def get_token(message: Message, state: FSMContext):
     if 'https' in message.text:
         token = message.text.removeprefix('https://api.vk.com/blank.html#access_token=')
         token = token[:-(len(token) - 85)]
-        await message.reply('Я запомню!')
-        await state.finish()
     elif len(message.text) == 85:
         token = message.text
-        await message.reply('Я запомню!')
-        await state.finish()
     else:
         await message.reply('Неверный токен!\n'
                             'Попробуйте еще раз\n'
@@ -79,6 +80,8 @@ async def get_token(message: Message, state: FSMContext):
     db.session.add(User(id=message.from_user.id, token=token, limit=200, group_attachments=True,
                         type_users=True, type_chats=True, type_groups=True))
     await db.session.commit()
+    await message.reply('Я запомню!')
+    await state.finish()
 
 
 @dp.message_handler(commands='reset')
@@ -246,6 +249,7 @@ async def on_startup(dp: Dispatcher):
 
 
 async def on_shutdown(dp: Dispatcher):
+    await db.session.close()
     await db.engine.dispose()
 
 
