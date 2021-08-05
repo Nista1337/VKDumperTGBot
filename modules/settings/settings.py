@@ -4,6 +4,7 @@ from init import db, User
 
 # SQLAlchemy imports
 from sqlalchemy.future import select
+from sqlalchemy import update
 
 # AIOGram imports
 from aiogram.types import Message, CallbackQuery
@@ -30,7 +31,8 @@ async def show_settings(message: Message, result: bool, edit: bool = False):
         InlineKeyboardButton('Токен', callback_data='token'),
         InlineKeyboardButton('Типы чатов', callback_data='types'),
         InlineKeyboardButton('Лимит', callback_data='limit'),
-        InlineKeyboardButton('Группировать вложения: ' + '\u2705' if result else '\u274c', callback_data='group_attach')
+        InlineKeyboardButton('Группировать вложения: ' + ('\u2705' if result else '\u274c'),
+                             callback_data='group_attach_' + ('y' if result else 'n'))
     ).row(
         InlineKeyboardButton('\u274c' + 'Выход', callback_data='close')
     )
@@ -42,6 +44,19 @@ async def show_settings(message: Message, result: bool, edit: bool = False):
     else:
         msg = await message.reply(text, reply_markup=keyboard)
         return msg
+
+
+@dp.callback_query_handler(lambda c: 'group_attach' in c.data, state=States.main)
+async def switch_group_attach(call: CallbackQuery):
+    await call.answer()
+    if call.data.split('_')[2] == 'y':
+        payload = False
+    else:
+        payload = True
+
+    await db.session.execute(update(User).filter_by(id=call.from_user.id).values(group_attachments=payload))
+    await db.session.commit()
+    await show_settings(call.message, payload, True)
 
 
 @dp.callback_query_handler(lambda c: c.data == 'back', state=States)
