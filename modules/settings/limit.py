@@ -48,7 +48,7 @@ async def set_limit_lvl2(call: CallbackQuery):
 @dp.message_handler(state=States.limit_lvl2)
 async def set_limit_lvl3(message: Message, state: FSMContext):
     limit = message.text
-    if limit.isdigit():
+    if limit.isdigit() and (int(limit) >= 200 or int(limit) == 0):
         await db.session.execute(update(User).filter_by(id=message.from_user.id).values(limit=limit))
         await db.session.commit()
         async with state.proxy() as data:
