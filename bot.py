@@ -33,6 +33,7 @@ import modules.settings.token
 import modules.settings.types
 import modules.settings.limit
 
+
 # FSM states
 class States(StatesGroup):
     get_token = State()
@@ -42,9 +43,8 @@ class States(StatesGroup):
 
 
 # Global variables
-process: subprocess.Popen
-stdout_worker: Thread
-output = []
+process = {}
+output = {}
 
 logger.info('Telegram bot for VKParser by AlexanderBaransky')
 logger.info('Ver. 0.1 Alpha')
@@ -112,13 +112,15 @@ async def cancel_reset(call: CallbackQuery, state: FSMContext):
     await state.finish()
 
 
-async def update_status(msg: Message):
+async def update_status(msg: Message, user_id: int):
+    global output
+    output[user_id] = []
     while True:
-        if process.poll() is not None:
-            return process.poll()
+        if process[user_id].poll() is not None:
+            return process[user_id].poll()
 
-        if output and process.poll() is None:
-            data = json.loads(output[-1])
+        if output[user_id] and process[user_id].poll() is None:
+            data = json.loads(output[user_id][-1])
             try:
                 await bot.edit_message_text('<b>Парсер работает...</b>\n' +
                                             get_smile("\ud83d\udce9") + f' Чатов сохранено: <i>{data["current"] - 1} '
@@ -135,10 +137,10 @@ async def update_status(msg: Message):
             await asyncio.sleep(0.5)
 
 
-def update_output():
+def update_output(user_id: int):
     global output
-    for line in process.stdout:
-        output.append(line.removesuffix('\n'))
+    for line in process[user_id].stdout:
+        output[user_id].append(line.removesuffix('\n'))
 
 
 @dp.message_handler(commands='launch')
@@ -165,14 +167,13 @@ async def launch(message: Message, state: FSMContext):
     if user.group_attachments:
         cmd.append('-G')
 
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd='../')
+    process[message.from_user.id] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                                     text=True, cwd='../')
     await bot.edit_message_text('<b>Парсер запущен!</b>', chat_id=message.chat.id, message_id=msg.message_id,
                                 parse_mode='HTML')
 
-    global stdout_worker
-
-    stdout_worker = Thread(target=update_output, daemon=True).start()
-    code = await update_status(msg)
+    Thread(target=update_output, args=(message.from_user.id,), daemon=True).start()
+    code = await update_status(msg, message.from_user.id)
     await state.finish()
     keyboard = None
     if code == 0:
@@ -202,13 +203,13 @@ async def launch(message: Message, state: FSMContext):
         await bot.edit_message_text(text, message_id=msg.message_id,
                                     chat_id=msg.chat.id, parse_mode='HTML')
 
-    await send_wrapper(message=msg)
+    await send_wrapper(message=msg, user_id=message.from_user.id)
 
 
 @dp.message_handler(commands='stop', state=States.working)
 async def stop(message: Message):
     msg = await message.reply('<b>Останавливаю парсер...</b>', reply=False, parse_mode='HTML')
-    process.terminate()
+    process[message.from_user.id].terminate()
     await bot.edit_message_text('<b>Парсер остановлен!</b>', message_id=msg.message_id, chat_id=msg.chat.id,
                                 parse_mode='HTML')
     await asyncio.sleep(3)
@@ -216,12 +217,12 @@ async def stop(message: Message):
 
 
 @dp.callback_query_handler(lambda c: c.data == 'yes', state=States.ask_send)
-async def send_wrapper(call: CallbackQuery = None, message: Message = None, state: FSMContext = None):
+async def send_wrapper(call: CallbackQuery = None, message: Message = None, user_id: int = None,
+                       state: FSMContext = None):
     if state:
         await state.finish()
 
-    global output
-    data = json.loads(output[-1])
+    data = json.loads(output[user_id][-1])
     if message:
         msg = message
     else:
@@ -231,7 +232,6 @@ async def send_wrapper(call: CallbackQuery = None, message: Message = None, stat
     await bot.send_chat_action(chat_id=msg.chat.id, action='upload_document')
     await bot.send_document(chat_id=msg.chat.id, document=InputFile(await get_packed_dir(data['path'][:-1])))
     await bot_msg.edit_text('<b>Готово!</b>', parse_mode='HTML')
-    output = []
 
 
 @dp.callback_query_handler(lambda c: c.data == 'no', state=States.ask_send)
@@ -240,8 +240,6 @@ async def reset_keyboard(call: CallbackQuery, state: FSMContext):
     await bot.edit_message_text(text=get_smile("\ud83d\udfe8") + ' <b>Завершено!</b>\nПарсер завершен вручную\n'
                                                                  'Сохранение выполнено частично',
                                 message_id=call.message.message_id, chat_id=call.message.chat.id, parse_mode='HTML')
-    global output
-    output = []
 
 
 async def on_startup(dp: Dispatcher):
