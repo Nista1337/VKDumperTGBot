@@ -230,7 +230,7 @@ async def send_wrapper(call: CallbackQuery = None, message: Message = None, user
 
     bot_msg = await msg.reply('<b>Отправляю архив...</b>', parse_mode='HTML', reply=False)
     await bot.send_chat_action(chat_id=msg.chat.id, action='upload_document')
-    await bot.send_document(chat_id=msg.chat.id, document=InputFile(await get_packed_dir(data['path'][:-1])))
+    await bot.send_document(chat_id=msg.chat.id, document=InputFile(await get_packed_dir('../' + data['path'][:-1])))
     await bot_msg.edit_text('<b>Готово!</b>', parse_mode='HTML')
 
 
